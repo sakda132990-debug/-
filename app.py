@@ -1,98 +1,105 @@
-import streamlit as st
+import customtkinter as ctk
 import yt_dlp
 import os
-import time
+import threading
+from tkinter import messagebox, filedialog
 import imageio_ffmpeg
 
-# ตั้งค่าหน้าเว็บ
-st.set_page_config(page_title="Raw Source Downloader (Max Quality)", page_icon="💎", layout="centered")
-st.title("💎 V.15 เครื่องมือเปลี่ยนลิ้งเป็นวีดีโอฟรี (ชัดที่สุดในโลก)")
-st.info("💡 หมายเหตุ: ความชัดขึ้นอยู่กับต้นฉบับ 100% ถ้าต้นฉบับชัด 4K เราก็ได้ 4K ครับ (แต่ถ้าต้นฉบับไม่ชัด เราก็ทำอะไรไม่ได้ครับ)")
+ctk.set_appearance_mode("Dark")
+ctk.set_default_color_theme("blue")
 
-# ฟังก์ชันโหลดคลิป (โหมดดูดไฟล์ดิบ)
-def download_raw_source(url):
-    timestamp = int(time.time())
-    # ตั้งชื่อไฟล์รอไว้ก่อน (เดี๋ยวตัวโหลดจะเติมนามสกุลให้เอง)
-    output_template = f"raw_video_{timestamp}.%(ext)s"
-    
-    ffmpeg_exe = imageio_ffmpeg.get_ffmpeg_exe()
-    
-    ydl_opts = {
-        # สูตรลับ V.15: ขอไฟล์ Video ที่ Bitrate สูงที่สุด + Audio ที่ Bitrate สูงที่สุด
-        # ไม่สนความละเอียด ขอแค่ "ดีที่สุด" (best)
-        'format': 'bestvideo+bestaudio/best',
-        
-        'outtmpl': output_template,
-        'noplaylist': True,
-        
-        # บังคับรวมร่างเป็น MKV หรือ MP4 เพื่อคุณภาพสูงสุด (MKV รองรับคุณภาพสูงกว่าในบางครั้ง)
-        'merge_output_format': 'mp4',
-        
-        'ffmpeg_location': ffmpeg_exe,
-        
-        # ปิดการแปลงไฟล์ที่ไม่จำเป็น เพื่อรักษาคุณภาพไฟล์ดิบไว้
-        'postprocessors': [{
-            'key': 'FFmpegVideoConvertor',
-            'preferedformat': 'mp4',
-        }],
-        
-        # TikTok: ขอแบบไม่มีลายน้ำ (No Watermark) ซึ่งมักจะชัดกว่า
-        'extractor_args': {'tiktok': {'adapt_html5_video_player': False}},
-    }
-    
-    with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-        info = ydl.extract_info(url, download=True)
-        filename = ydl.prepare_filename(info)
-        
-        # เช็คไฟล์ผลลัพธ์ (เผื่อโดนเปลี่ยนนามสกุล)
-        base, ext = os.path.splitext(filename)
-        final_filename = filename
-        
-        # บางทีมันเซฟเป็น .mkv หรือ .webm เราต้องหาให้เจอ
-        possible_exts = ['.mp4', '.mkv', '.webm']
-        if not os.path.exists(final_filename):
-             for try_ext in possible_exts:
-                 if os.path.exists(base + try_ext):
-                     final_filename = base + try_ext
-                     break
-        
-        # ส่งค่ากลับ: ชื่อไฟล์, ความชัด, และ Bitrate (ถ้ามี)
-        resolution = info.get('resolution', 'Unknown')
-        if resolution == 'Unknown': # ลองหาจาก height
-             h = info.get('height')
-             if h: resolution = f"{h}p"
-             
-        return final_filename, resolution
+class VideoDownloaderApp(ctk.CTk):
+    def __init__(self):
+        super().__init__()
+        self.title("โปรแกรมแปลงวีดีโอ")
+        self.geometry("600x480")
 
-# --- หน้าเว็บ ---
-url = st.text_input("👉 วางลิงก์ YouTube/TikTok (ขอคลิปชัดๆ):", placeholder="https://...")
+        self.label_title = ctk.CTkLabel(self, text="💎 โปรแกรมแปลงวีดีโอ", font=("Arial", 22, "bold"))
+        self.label_title.pack(pady=30)
 
-if st.button("🚀 ดูดไฟล์ต้นฉบับ (Raw Download)"):
-    if url:
-        st.write("⏳ กำลังขุดหาไฟล์ที่ชัดที่สุดจาก Server... (รอแป๊บนะครับ)")
+        self.entry_url = ctk.CTkEntry(self, placeholder_text="วางลิงก์ YouTube, TikTok, Facebook...", width=480, height=45)
+        self.entry_url.pack(pady=10)
+
+        self.btn_download = ctk.CTkButton(self, text="🚀 เริ่มดาวน์โหลดความชัดสูงสุด", 
+                                          width=250, height=55, 
+                                          font=("Arial", 18, "bold"),
+                                          command=self.start_download_thread)
+        self.btn_download.pack(pady=20)
+
+        self.label_status = ctk.CTkLabel(self, text="สถานะ: พร้อมใช้งาน", text_color="gray")
+        self.label_status.pack(pady=10)
+
+    def start_download_thread(self):
+        url = self.entry_url.get()
+        if not url:
+            messagebox.showwarning("แจ้งเตือน", "กรุณาวางลิงก์ก่อนครับ")
+            return
         
+        save_path = filedialog.asksaveasfilename(
+            defaultextension=".mp4",
+            filetypes=[("Video files", "*.mp4")],
+            title="เลือกที่เก็บไฟล์"
+        )
+        
+        if not save_path: return
+
+        self.btn_download.configure(state="disabled", text="⏳ กำลังทำงาน...")
+        self.label_status.configure(text="กำลังดึงข้อมูลไฟล์...", text_color="orange")
+        
+        thread = threading.Thread(target=self.download_video, args=(url, save_path))
+        thread.daemon = True
+        thread.start()
+
+    def download_video(self, url, save_path):
         try:
-            file_path, resolution = download_raw_source(url)
-            
-            if os.path.exists(file_path):
-                st.success(f"✅ ได้ไฟล์มาแล้ว! ความละเอียด: {resolution}")
-                st.caption("⚠️ ถ้าดูในเว็บแล้วภาพแตก ไม่ต้องตกใจนะครับ! ให้กดปุ่ม Save แล้วไปเปิดในเครื่อง จะชัดแจ๋วครับ")
+            ffmpeg_exe = imageio_ffmpeg.get_ffmpeg_exe()
+            ydl_opts = {
+                'format': 'bestvideo+bestaudio/best',
+                'outtmpl': save_path,
+                'merge_output_format': 'mp4',
+                'ffmpeg_location': ffmpeg_exe,
+                'noplaylist': True,
+                'quiet': True,
                 
-                # โชว์คลิป (Browser อาจจะลดคุณภาพตอนพรีวิว)
-                st.video(file_path)
-                
-                # ปุ่มโหลดไฟล์จริง
-                with open(file_path, "rb") as f:
-                    st.download_button(
-                        label=f"💾 กดตรงนี้เพื่อบันทึกไฟล์ ({os.path.basename(file_path)})",
-                        data=f,
-                        file_name=os.path.basename(file_path),
-                        mime="video/mp4"
-                    )
-            else:
-                st.error("❌ หาไฟล์ไม่เจอ ลองใหม่อีกครั้งครับ")
-                
-        except Exception as e:
-            st.error(f"❌ เกิดข้อผิดพลาด: {e}")
-    else:
-        st.warning("⚠️ กรุณาวางลิงก์ก่อนครับ")
+                # --- ส่วนเพิ่มเพื่อแก้ปัญหาไม่มีเสียง (Opus Fix) ---
+                'postprocessors': [{
+                    'key': 'FFmpegVideoConvertor',
+                    'preferedformat': 'mp4', # บังคับรวมเป็น MP4 ที่มาตรฐานที่สุด
+                }, {
+                    'key': 'FFmpegExtractAudio',
+                    'preferredcodec': 'aac', # ใช้ Codec เสียง AAC ที่เปิดได้ทุกเครื่อง
+                }],
+                # ---------------------------------------------
+
+                'http_headers': {
+                    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+                },
+            } AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+                    'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+                    'Accept-Language': 'en-us,en;q=0.5',
+                    'Sec-Fetch-Mode': 'navigate',
+                },
+                'nocheckcertificate': True,
+                # ------------------------------------
+            }
+            }
+            with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+                ydl.download([url])
+            self.after(0, lambda: self.finish_download(True))
+        except Exception as err:
+            # แก้บั๊ก NameError: ส่งค่า err ไปเป็น string แทน
+            error_message = str(err)
+            self.after(0, lambda: self.finish_download(False, error_message))
+
+    def finish_download(self, success, error_msg=""):
+        self.btn_download.configure(state="normal", text="🚀 เริ่มดาวน์โหลดความชัดสูงสุด")
+        if success:
+            self.label_status.configure(text="✅ ดาวน์โหลดสำเร็จ!", text_color="#00FF00")
+            messagebox.showinfo("สำเร็จ", "ดาวน์โหลดวิดีโอเรียบร้อย!")
+        else:
+            self.label_status.configure(text="❌ เกิดข้อผิดพลาด", text_color="red")
+            messagebox.showerror("ผิดพลาด", f"สาเหตุ: {error_msg}")
+
+if __name__ == "__main__":
+    app = VideoDownloaderApp()
+    app.mainloop()
