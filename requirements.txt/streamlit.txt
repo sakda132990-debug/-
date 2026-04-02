@@ -1,6 +1,0 @@
-streamlit
-yt-dlp
-imageio-ffmpeg
-moviepy
-gTTS
-Pillow
